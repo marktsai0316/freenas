@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
     config = [
         'GRUB_DISTRIBUTOR="TrueNAS Scale"',
-        'GRUB_CMDLINE_LINUX_DEFAULT=""',
+        'GRUB_CMDLINE_LINUX_DEFAULT="amd_iommu=on iommu=pt kvm_amd.npt=1 kvm_amd.avic=1 intel_iommu=on"',
     ]
 
     terminal = ["console"]
