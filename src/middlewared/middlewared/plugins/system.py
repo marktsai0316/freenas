@@ -335,6 +335,9 @@ class SystemAdvancedService(ConfigService):
                 await self.middleware.call('etc.generate', 'kdump')
                 await self.middleware.call('etc.generate', 'grub')
 
+            if osc.IS_LINUX and original_data['isolated_gpu_pci_ids'] != config_data['isolated_gpu_pci_ids']:
+                await self.middleware.call('etc.generate', 'gpu_configuration')
+
         return await self.config()
 
     @accepts()

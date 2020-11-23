@@ -315,6 +315,12 @@ class EtcService(Service):
             {'type': 'mako', 'path': 'cni/net.d/multus.d/multus.kubeconfig', 'platform': 'Linux', 'checkpoint': None},
             {'type': 'mako', 'path': 'cni/net.d/kube-router.d/kubeconfig', 'platform': 'Linux', 'checkpoint': None},
         ],
+        'gpu_configuration': [
+            {'type': 'mako', 'path': 'initramfs-tools/modules', 'platform': 'Linux'},
+            {'type': 'mako', 'path': 'modules', 'platform': 'Linux'},
+            {'type': 'mako', 'path': 'modprobe.d/kvm.conf', 'platform': 'Linux'},
+            {'type': 'py', 'path': 'gpu_conf', 'platform': 'Linux', 'checkpoint': None},
+        ],
     }
     LOCKS = defaultdict(asyncio.Lock)
 
