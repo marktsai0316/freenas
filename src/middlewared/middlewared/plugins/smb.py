@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import uuid
+from bidict import bidict
 
 try:
     from samba.samba3 import param
@@ -22,13 +23,13 @@ except ImportError:
     param = None
 
 
-LOGLEVEL_MAP = {
+LOGLEVEL_MAP = bidict({
     '0': 'NONE',
     '1': 'MINIMUM',
     '2': 'NORMAL',
     '3': 'FULL',
     '10': 'DEBUG',
-}
+})
 RE_NETBIOSNAME = re.compile(r"^[a-zA-Z0-9\.\-_!@#\$%^&\(\)'\{\}~]{1,15}$")
 
 LP_CTX = param.get_context()
@@ -46,7 +47,7 @@ class SMBHAMODE(enum.IntEnum):
     STANDALONE = 0
     LEGACY = 1
     UNIFIED = 2
-    CLUSTERED = 2
+    CLUSTERED = 3
 
 
 class SMBCmd(enum.Enum):
@@ -426,22 +427,18 @@ class SMBService(SystemServiceService):
                                 load.stderr.decode())
 
     @private
+    async def test_setup(self):
+        data = await self.config()
+        await self.middleware.call('smb.reg_update', data)
+
+    @private
     @job(lock="smb_configure")
     async def configure(self, job):
-        await self.reset_smb_ha_mode()
+        ha_mode = SMBHAMODE[(await self.reset_smb_ha_mode())]
         job.set_progress(0, 'Preparing to configure SMB.')
         data = await self.config()
-        job.set_progress(10, 'Generating SMB config.')
+        job.set_progress(10, 'Generating stub SMB config.')
         await self.middleware.call('etc.generate', 'smb')
-
-        # Following hack will be removed once we make our own samba package
-        if osc.IS_LINUX:
-            try:
-                os.remove("/etc/samba/smb.conf")
-            except FileNotFoundError:
-                pass
-
-            os.symlink("/etc/smb4.conf", "/etc/samba/smb.conf")
 
         """
         Many samba-related tools will fail if they are unable to initialize
@@ -450,6 +447,31 @@ class SMBService(SystemServiceService):
         """
         job.set_progress(20, 'Setting up SMB directories.')
         await self.setup_directories()
+
+
+        """
+        smb4.conf registry setup. The smb config is split between five 
+        different middleware plugins (smb, idmap, ad, ldap, sharing.smb).
+        This initializes them in the above order so that configuration errors
+        do not occur.
+        """ 
+        job.set_progress(25, 'generating SMB, idmap, and directory service config.')
+        await self.middleware.call('smb.reg_update', data)
+
+        if ha_mode == SMBHAMODE.CLUSTERED:
+            ad_enabled = (await self.middleware.call('smb.getparm', 'security', 'global')) == 'ADS
+            ldap_enabled = (await self.middleware.call('directoryservices.get_conf', 'directoryservice.ldap'))['enable']
+            await self.middleware.call('idmap.ctdb_setup')
+        else:
+            ad_enabled = (await self.middleware.call('activedirectory.config'))['enable']
+            ldap_enabled = (await self.middleware.call('ldap.config'))['enable']
+            await self.middleware.call('idmap.synchronize_idmap')
+
+        if ad_enabled:
+            await self.middleware.call('activedirectory.synchronize_config')
+        elif ldap_enabled:
+            await self.middleware.call('ldap.synchronize_config')
+
         job.set_progress(30, 'Setting up server SID.')
         await self.middleware.call('smb.set_sid', data['cifs_SID'])
 
@@ -458,8 +480,11 @@ class SMBService(SystemServiceService):
         will provide the SMB users and groups. We skip these steps to avoid having
         samba potentially try to write our local users and groups to the remote
         LDAP server.
+
+        Local users and groups are skipped on clustered servers for now.
         """
-        if await self.middleware.call("smb.getparm", "passdb backend", "global") == "tdbsam":
+        passdb_backend = await self.middleware.call('smb.getparm', 'passdb backend', 'global')
+        if ha_mode != SMBHAMODE.CLUSTERED and passdb_backend == "tdbsam":
             job.set_progress(40, 'Synchronizing passdb and groupmap.')
             await self.middleware.call('etc.generate', 'user')
             pdb_job = await self.middleware.call("smb.synchronize_passdb")
@@ -471,13 +496,16 @@ class SMBService(SystemServiceService):
         """
         The following steps ensure that we cleanly import our SMB shares
         into the registry.
+        This step is not required when underlying database is clustered (cluster node should
+        just recover with info from other nodes on reboot).
         """
         job.set_progress(60, 'generating SMB share configuration.')
-        await self.middleware.call('cache.put', 'SMB_REG_INITIALIZED', False)
-        await self.middleware.call("etc.generate", "smb_share")
-        await self.middleware.call("smb.import_conf_to_registry")
-        await self.middleware.call('cache.put', 'SMB_REG_INITIALIZED', True)
-        os.unlink(SMBPath.SHARECONF.platform())
+        if ha_mode != SMBHAMODE.CLUSTERED:
+            await self.middleware.call('cache.put', 'SMB_REG_INITIALIZED', False)
+            await self.middleware.call("etc.generate", "smb_share")
+            await self.middleware.call("smb.import_conf_to_registry")
+            await self.middleware.call('cache.put', 'SMB_REG_INITIALIZED', True)
+            os.unlink(SMBPath.SHARECONF.platform())
 
         """
         It is possible that system dataset was migrated or an upgrade
@@ -626,6 +654,19 @@ class SMBService(SystemServiceService):
             except (ValueError, TypeError):
                 verrors.add(f'smb_update.{i}', 'Not a valid mask')
 
+    @private
+    async def config(self):
+        ha_mode = SMBHAMODE[(await self.middleware.call('smb.get_smb_ha_mode'))]
+        if ha_mode != SMBHAMODE.CLUSTERED:
+            return await self.middleware.call(
+                'datastore.config',
+                self._config.datastore,
+                {'extend': self._config.datastore_extend,
+                 'prefix': self._config.datastore_prefix}
+            )
+
+        return await self.middleware.call('smb.reg_config')
+
     @accepts(Dict(
         'smb_update',
         Str('netbiosname', max_length=15),
@@ -698,7 +739,12 @@ class SMBService(SystemServiceService):
 
         await self.compress(new)
 
-        await self._update_service(old, new)
+        if ha_mode != SMBHAMODE.CLUSTERED:
+            await self._update_service(old, new)
+        else:
+            await self.middleware.call('smb.reg_update', new)
+            await self._service_change(self._config.service, 'restart')
+
         await self.reset_smb_ha_mode()
 
         """
@@ -1061,6 +1107,7 @@ class SharingSMBService(SharingService):
         else:
             ha_mode = SMBHAMODE[ha_mode_str]
 
+        self.logger.debug("hamode: %s", ha_mode.name)
         if ha_mode == SMBHAMODE.CLUSTERED:
             result = await self.middleware.call(
                 'sharing.smb.registry_query', filters, options
