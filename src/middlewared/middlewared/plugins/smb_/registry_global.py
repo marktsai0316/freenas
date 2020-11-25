@@ -1,7 +1,7 @@
 from middlewared.service import private, Service
 from middlewared.service_exception import CallError
 from middlewared.utils import run
-from middlewared.plugins.smb import SMBCmd, SMBPath, LOGLEVEL_MAP
+from middlewared.plugins.smb import SMBCmd, LOGLEVEL_MAP
 from middlewared.plugins.activedirectory import DEFAULT_AD_PARAMETERS
 from middlewared.utils import osc
 
@@ -43,9 +43,9 @@ class SMBService(Service):
     @private
     async def reg_default_params(self):
         ret = {}
-        ret['smb'] = default_global_parameters.keys()
+        ret['smb'] = DEFAULT_GLOBAL_PARAMETERS.keys()
         ret['ad'] = DEFAULT_AD_PARAMETERS.keys()
-        ret['ldap'] = default_ldap_parameters.keys()
+        ret['ldap'] = DEFAULT_LDAP_PARAMETERS.keys()
         return ret
 
     @private
@@ -67,8 +67,8 @@ class SMBService(Service):
     @private
     async def strip_directory_services(self, reg_defaults):
         def_ds_params = []
-        def_ds_params.extend(default_ad_parameters.keys())
-        def_ds_params.extend(default_ldap_parameters.keys())
+        def_ds_params.extend(DEFAULT_AD_PARAMETERS.keys())
+        def_ds_params.extend(DEFAULT_LDAP_PARAMETERS.keys())
         ds_params = {}
 
         for k, v in reg_defaults.items():
@@ -84,6 +84,11 @@ class SMBService(Service):
     async def reg_globals(self):
         """
         Split smb.conf parameters into portions used by relevant plugins.
+
+        `raw` contains unmodified smb.conf
+        `idmap` contains idmap configuration
+        `ds` contains directory service configuration
+        `smb` contains smb service configuation (smb plugin)
         """
         ret = {}
         global_conf = await self.middleware.call('sharing.smb.reg_showshare', 'global')
@@ -94,48 +99,11 @@ class SMBService(Service):
         return ret
 
     @private
-    async def strip_defaults(self, reg_defaults):
-        def remove_keys(to_remove):
-            self.logger.debug(to_remove)
-            to_delete = []
-            for k, v in to_remove.items():
-                if reg_defaults.get(k) == v:
-                    to_delete.append(k)
-            for e in to_delete:
-                reg_defaults.pop(e, "")
-
-        server_role = reg_defaults.pop("server role", "standalone")
-        security = reg_defaults.pop("security", "")
-        ad_enabled = security == "ADS"
-        ldap_enabled = server_role == "member server" and security == "user"
-
-        remove_keys(default_global_parameters.copy())
-        if ad_enabled:
-            remove_keys(default_ad_parameters)
-            reg_defaults.pop('realm')
-            reg_defaults.pop('template homedir')
-            reg_defaults.pop('ads dns update')
-            reg_defaults.pop('allow trusted domains')
-            reg_defaults.pop('winbind use default domain')
-            reg_defaults.pop('winbind nss info')
-            reg_defaults.pop('winbind enum users')
-            reg_defaults.pop('winbind enum groups')
-
-        if ldap_enabled:
-            remove_keys(default_ldap_parameters)
-            reg_defaults.pop("obey pam restrictions")
-            reg_defaults.pop("passdb backend")
-            reg_defaults.pop("ldap ssl")
-            reg_defaults.pop("ldap admin dn")
-            reg_defaults.pop("ldap suffix")
-
-    @private
     async def reg_config(self):
         """
-        Convert registry config back into our normal smb.conf fields.
-        Parametric entries in smb.conf bypass validation. This means
-        that TrueNAS-config specific parameters can be safely written
-        with a "tn:" prefix.
+        This co-routine is called in smb.config() when cluster support is enabled.
+        In a clustered configuration, we rely exclusively on the contents of the
+        clustered SMB configuration in Samba's registry.
         """
         reg_globals = (await self.middleware.call('smb.reg_globals'))['smb']
         bind_ips = (reg_globals.pop("interfaces", "")).split()

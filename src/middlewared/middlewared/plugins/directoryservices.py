@@ -14,14 +14,14 @@ from middlewared.utils import run
 from samba.dcerpc.messaging import MSG_WINBIND_OFFLINE, MSG_WINBIND_ONLINE
 
 DEFAULT_AD_CONF = {
-  "id": 1,
-  "bindname": "",
-  "verbose_logging": False,
-  "kerberos_principal": "",
-  "kerberos_realm": None,
-  "createcomputer": "",
-  "disable_freenas_cache": False,
-  "restrict_pam": False
+    "id": 1,
+    "bindname": "",
+    "verbose_logging": False,
+    "kerberos_principal": "",
+    "kerberos_realm": None,
+    "createcomputer": "",
+    "disable_freenas_cache": False,
+    "restrict_pam": False
 }
 
 

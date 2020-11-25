@@ -885,23 +885,29 @@ class IdmapDomainService(CRUDService):
                 range = [-1, -1]
 
             entry = {
-               "dns_domain_name": None,
-               "range_low": int(range[0]),
-               "range_high": int(range[1]),
-               "idmap_backend": v.pop("backend").upper(),
-               "options": v.copy(),
-               "certificate": None,
+                "dns_domain_name": None,
+                "range_low": int(range[0]),
+                "range_high": int(range[1]),
+                "idmap_backend": v.pop("backend").upper(),
+                "options": v.copy(),
+                "certificate": None,
             }
             if k == DSType.DS_TYPE_DEFAULT_DOMAIN.name:
                 entry.update({
-                   "id": 5,
-                   "name": k,
+                    "id": 5,
+                    "name": k,
                 })
             elif k.casefold() == workgroup and security == "ADS":
                 entry.update({
-                   "id": 1,
-                   "name": DSType.DS_TYPE_ACTIVEDIRECTORY.name,
+                    "id": 1,
+                    "name": DSType.DS_TYPE_ACTIVEDIRECTORY.name,
                 })
+            else:
+                entry.update({
+                    "id": next_id,
+                    "name": domain,
+                })
+
             rv.append(entry)
 
         return rv
@@ -919,10 +925,9 @@ class IdmapDomainService(CRUDService):
         workgroup = await self.middleware.call('smb.getparm', 'workgroup', 'global')
 
         ad_enabled = security == 'ADS'
+        # In this situation (since we're dealing with idmap backends) we simply check for items set if we have samba_schema
         ldap_enabled = (server_role == 'member server' and security == 'user')
-
         ad_idmap = filter_list(idmap, [('name', '=', DSType.DS_TYPE_ACTIVEDIRECTORY.name)], {'get': True}) if ad_enabled else None
-        ldap_idmap = filter_list(idmap, [('name', '=', DSType.DS_TYPE_LDAP.name)], {'get': True}) if ad_enabled else None
 
         for i in idmap:
             if i['name'] == DSType.DS_TYPE_DEFAULT_DOMAIN.name:
@@ -962,7 +967,7 @@ class IdmapDomainService(CRUDService):
         else:
             idmaps = to_check
 
-        r = to_check
+        r = idmaps
         s_keys = set(data.keys())
         r_keys = set(r.keys())
         intersect = s_keys.intersection(r_keys)
@@ -1029,6 +1034,7 @@ class IdmapDomainService(CRUDService):
 
     @private
     async def reg_delete(self, id):
+        ha_mode = await self.middleware.call('smb.get_smb_ha_mode')
         remaining = await self.query([('id', '!=', id)], {'extra': {'ha_mode': ha_mode.name}})
         smbconf = await self.idmap_to_smbconf(remaining)
         diff = await self.diff_conf_and_registry(smbconf)

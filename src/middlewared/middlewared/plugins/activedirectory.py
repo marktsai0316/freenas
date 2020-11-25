@@ -247,6 +247,7 @@ class ActiveDirectory_Conn(object):
         nl = netlogon.netlogon(f"ncacn_ip_tcp:{dc}[schannel,seal]",
                                LP_CTX, self.cred)
         self.cred.new_client_authenticator()
+        del(nl)
         return True
 
     def get_site(self):
@@ -644,10 +645,10 @@ class ActiveDirectoryService(ConfigService):
     @private
     async def ad_to_registry(self, data):
         rv = {}
-        if ad['enable'] == False
+        if data['enable'] is False:
             return rv
 
-        for k, v in default_ad_parameters.items():
+        for k, v in DEFAULT_AD_PARAMETERS.items():
             if v is None:
                 continue
             rv[k] = v
@@ -655,11 +656,10 @@ class ActiveDirectoryService(ConfigService):
         rv.update({
             "allow_dns_updates": "Yes" if data.get("allow_dns_updates") else "No",
             "realm": data["domainname"].upper(),
-            "realm": data["domainname"].upper(),
             "winbind allow trusted domains": "Yes" if data.get("allow_trusted_domains") else "No",
-            "winbind enum users: "No" if data.get("disable_freenas_cache") else "Yes",
-            "winbind enum groups: "No" if data.get("disable_freenas_cache") else "Yes",
-            "winbind use default domain": "Yes" data.get("use_default_domain") else "No",
+            "winbind enum users": "No" if data.get("disable_freenas_cache") else "Yes",
+            "winbind enum groups": "No" if data.get("disable_freenas_cache") else "Yes",
+            "winbind use default domain": "Yes" if data.get("use_default_domain") else "No",
             "winbind nss info": data.get("nss_info", "template"),
         })
         return rv
@@ -667,9 +667,9 @@ class ActiveDirectoryService(ConfigService):
     @private
     async def diff_conf_and_registry(self, data):
         smbconf = (await self.middleware.call('smb.reg_globals'))['ds']
-        to_check = await ad_to_registry(data)
+        to_check = await self.ad_to_registry(data)
 
-        r = to_check
+        r = smbconf
         s_keys = set(to_check.keys())
         r_keys = set(r.keys())
         intersect = s_keys.intersection(r_keys)

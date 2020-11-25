@@ -448,18 +448,17 @@ class SMBService(SystemServiceService):
         job.set_progress(20, 'Setting up SMB directories.')
         await self.setup_directories()
 
-
         """
-        smb4.conf registry setup. The smb config is split between five 
+        smb4.conf registry setup. The smb config is split between five
         different middleware plugins (smb, idmap, ad, ldap, sharing.smb).
         This initializes them in the above order so that configuration errors
         do not occur.
-        """ 
+        """
         job.set_progress(25, 'generating SMB, idmap, and directory service config.')
         await self.middleware.call('smb.reg_update', data)
 
         if ha_mode == SMBHAMODE.CLUSTERED:
-            ad_enabled = (await self.middleware.call('smb.getparm', 'security', 'global')) == 'ADS
+            ad_enabled = (await self.middleware.call('smb.getparm', 'security', 'global')) == 'ADS'
             ldap_enabled = (await self.middleware.call('directoryservices.get_conf', 'directoryservice.ldap'))['enable']
             await self.middleware.call('idmap.ctdb_setup')
         else:
@@ -739,6 +738,7 @@ class SMBService(SystemServiceService):
 
         await self.compress(new)
 
+        ha_mode = SMBHAMODE[(await self.middleware.call('smb.get_smb_ha_mode'))]
         if ha_mode != SMBHAMODE.CLUSTERED:
             await self._update_service(old, new)
         else:
