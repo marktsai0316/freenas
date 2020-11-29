@@ -96,6 +96,7 @@ class UserService(CRUDService):
         datastore = 'account.bsdusers'
         datastore_extend = 'user.user_extend'
         datastore_prefix = 'bsdusr_'
+        cli_namespace = 'account.user'
 
     @private
     async def user_extend(self, user):
@@ -127,7 +128,7 @@ class UserService(CRUDService):
         return user
 
     @filterable
-    async def query(self, filters=None, options=None):
+    async def query(self, filters, options):
         """
         Query users with `query-filters` and `query-options`. As a performance optimization, only local users
         will be queried by default.
@@ -182,7 +183,7 @@ class UserService(CRUDService):
         Bool('smb', default=True),
         Bool('sudo', default=False),
         Str('sshpubkey', null=True, max_length=None),
-        List('groups', default=[]),
+        List('groups'),
         Dict('attributes', additional_attrs=True),
         register=True,
     ))
@@ -509,7 +510,7 @@ class UserService(CRUDService):
         return pk
 
     @accepts(Int('id'), Dict('options', Bool('delete_group', default=True)))
-    async def do_delete(self, pk, options=None):
+    async def do_delete(self, pk, options):
         """
         Delete user `id`.
 
@@ -547,7 +548,7 @@ class UserService(CRUDService):
         return pk
 
     @accepts(Int('user_id', default=None, null=True))
-    def shell_choices(self, user_id=None):
+    def shell_choices(self, user_id):
         """
         Return the available shell choices to be used in `user.create` and `user.update`.
 
@@ -967,6 +968,7 @@ class GroupService(CRUDService):
         datastore = 'account.bsdgroups'
         datastore_prefix = 'bsdgrp_'
         datastore_extend = 'group.group_extend'
+        cli_namespace = 'account.group'
 
     @private
     async def group_extend(self, group):
@@ -984,7 +986,7 @@ class GroupService(CRUDService):
         return group
 
     @filterable
-    async def query(self, filters=None, options=None):
+    async def query(self, filters, options):
         """
         Query groups with `query-filters` and `query-options`. As a performance optimization, only local groups
         will be queried by default.
@@ -1146,7 +1148,7 @@ class GroupService(CRUDService):
         return pk
 
     @accepts(Int('id'), Dict('options', Bool('delete_users', default=False)))
-    async def do_delete(self, pk, options=None):
+    async def do_delete(self, pk, options):
         """
         Delete group `id`.
 

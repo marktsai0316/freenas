@@ -4,6 +4,7 @@ from functools import wraps
 import asyncio
 import errno
 import inspect
+import itertools
 import json
 import os
 import re
@@ -193,6 +194,12 @@ def private(fn):
     return fn
 
 
+def cli_private(fn):
+    """Do not expose method in CLI"""
+    fn._cli_private = True
+    return fn
+
+
 def filterable(fn):
     fn._filterable = True
     return accepts(Ref('query-filters'), Ref('query-options'))(fn)
@@ -225,7 +232,8 @@ class ServiceBase(type):
       - verbose_name: human-friendly singular name for the service
       - thread_pool: thread pool to use for threaded methods
       - process_pool: process pool to run service methods
-
+      - cli_namespace: replace namespace identifier for CLI
+      - cli_private: if the service is not private, this flags whether or not the service is visible in the CLI
     """
 
     def __new__(cls, name, bases, attrs):
@@ -236,38 +244,44 @@ class ServiceBase(type):
         config = attrs.pop('Config', None)
         klass = super_new(cls, name, bases, attrs)
 
-        namespace = klass.__name__
-        if namespace.endswith('Service'):
-            namespace = namespace[:-7]
-        namespace = namespace.lower()
-
-        config_attrs = {
-            'datastore': None,
-            'datastore_prefix': '',
-            'datastore_extend': None,
-            'datastore_extend_context': None,
-            'event_register': True,
-            'event_send': True,
-            'service': None,
-            'service_model': None,
-            'service_verb': 'reload',
-            'service_verb_sync': True,
-            'namespace': namespace,
-            'namespace_alias': None,
-            'private': False,
-            'thread_pool': None,
-            'process_pool': None,
-            'verbose_name': klass.__name__.replace('Service', ''),
-        }
-
         if config:
-            config_attrs.update({
-                k: v
-                for k, v in list(config.__dict__.items()) if not k.startswith('_')
-            })
+            klass._config_specified = {k: v for k, v in config.__dict__.items() if not k.startswith('_')}
+        else:
+            klass._config_specified = {}
 
-        klass._config = type('Config', (), config_attrs)
+        klass._config = service_config(klass, klass._config_specified)
         return klass
+
+
+def service_config(klass, config):
+    namespace = klass.__name__
+    if namespace.endswith('Service'):
+        namespace = namespace[:-7]
+    namespace = namespace.lower()
+
+    config_attrs = {
+        'datastore': None,
+        'datastore_prefix': '',
+        'datastore_extend': None,
+        'datastore_extend_context': None,
+        'event_register': True,
+        'event_send': True,
+        'service': None,
+        'service_model': None,
+        'service_verb': 'reload',
+        'service_verb_sync': True,
+        'namespace': namespace,
+        'namespace_alias': None,
+        'private': False,
+        'thread_pool': None,
+        'process_pool': None,
+        'cli_namespace': None,
+        'cli_private': False,
+        'verbose_name': klass.__name__.replace('Service', ''),
+    }
+    config_attrs.update(config)
+
+    return type('Config', (), config_attrs)
 
 
 class Service(object, metaclass=ServiceBase):
@@ -310,11 +324,16 @@ class CompoundService(Service):
     def __init__(self, middleware, parts):
         super().__init__(middleware)
 
-        for part in parts[1:]:
-            if self._part_config(part) != self._part_config(parts[0]):
-                raise RuntimeError(f'Service parts configs for {part} and {parts[0]} do not match')
+        config_specified = {}
+        for part1, part2 in itertools.combinations(parts, 2):
+            for key in set(part1._config_specified.keys()) & set(part2._config_specified.keys()):
+                if part1._config_specified[key] != part2._config_specified[key]:
+                    raise RuntimeError(f'{part1} has {key}={part1._config_specified[key]!r}, but '
+                                       f'{part2} has {key}={part2._config_specified[key]!r}')
+            config_specified.update(part1._config_specified)
+            config_specified.update(part2._config_specified)
 
-        self._config = parts[0]._config
+        self._config = service_config(parts[0].__class__, config_specified)
 
         self.parts = parts
 
@@ -336,10 +355,8 @@ class CompoundService(Service):
                 setattr(self, name, meth)
                 methods_parts[name] = part
 
-    def _part_config(self, part):
-        # datastore and event fields are related to CRUDService only, allow not repeating them for other parts
-        return {k: v for k, v in part._config.__dict__.items()
-                if not k.startswith('__') and not k.startswith('datastore') and not k.startswith('event')}
+    def __repr__(self):
+        return f"<CompoundService: {', '.join([repr(part) for part in self.parts])}>"
 
 
 class ConfigService(ServiceChangeMixin, Service):
@@ -435,7 +452,7 @@ class CRUDService(ServiceChangeMixin, Service):
         return options
 
     @filterable
-    async def query(self, filters=None, options=None):
+    async def query(self, filters, options):
         if not self._config.datastore:
             raise NotImplementedError(
                 f'{self._config.namespace}.query must be implemented or a '
@@ -736,6 +753,9 @@ class ServicePartBase(metaclass=ServicePartBaseMeta):
 
 class CoreService(Service):
 
+    class Config:
+        cli_namespace = 'system.core'
+
     @accepts(Str('id'), Int('cols'), Int('rows'))
     async def resize_shell(self, id, cols, rows):
         """
@@ -748,7 +768,7 @@ class CoreService(Service):
         shell.resize(cols, rows)
 
     @filterable
-    def sessions(self, filters=None, options=None):
+    def sessions(self, filters, options):
         """
         Get currently open websocket sessions.
         """
@@ -791,7 +811,7 @@ class CoreService(Service):
             }
 
     @filterable
-    def get_jobs(self, filters=None, options=None):
+    def get_jobs(self, filters, options):
         """Get the long running jobs."""
         jobs = filter_list([
             i.__encode__() for i in list(self.middleware.jobs.all().values())
@@ -846,12 +866,14 @@ class CoreService(Service):
         job = self.middleware.jobs.all()[id]
         return job.abort()
 
-    @accepts()
-    def get_services(self):
+    @accepts(Bool('cli', default=False))
+    def get_services(self, cli):
         """Returns a list of all registered services."""
         services = {}
         for k, v in list(self.middleware.get_services().items()):
             if v._config.private is True:
+                continue
+            if cli and v._config.cli_private:
                 continue
             if is_service_class(v, CRUDService):
                 _typ = 'crud'
@@ -860,16 +882,19 @@ class CoreService(Service):
             else:
                 _typ = 'service'
             services[k] = {
-                'config': {k: v for k, v in list(v._config.__dict__.items()) if not k.startswith(('_', 'process_pool', 'thread_pool'))},
+                'config': {k: v for k, v in list(v._config.__dict__.items())
+                           if not k.startswith(('_', 'process_pool', 'thread_pool'))},
                 'type': _typ,
             }
         return services
 
-    @accepts(Str('service', default=None, null=True))
-    def get_methods(self, service=None):
-        """Return methods metadata of every available service.
+    @accepts(Str('service', default=None, null=True), Bool('cli', default=False))
+    def get_methods(self, service, cli):
+        """
+        Return methods metadata of every available service.
 
-        `service` parameter is optional and filters the result for a single service."""
+        `service` parameter is optional and filters the result for a single service.
+        """
         data = {}
         for name, svc in list(self.middleware.get_services().items()):
             if service is not None and name != service:
@@ -877,6 +902,8 @@ class CoreService(Service):
 
             # Skip private services
             if svc._config.private:
+                continue
+            if cli and svc._config.cli_private:
                 continue
 
             for attr in dir(svc):
@@ -927,6 +954,8 @@ class CoreService(Service):
 
                 # Skip private methods
                 if hasattr(method, '_private'):
+                    continue
+                if cli and hasattr(method, '_cli_private'):
                     continue
 
                 # terminate is a private method used to clean up a service on shutdown
@@ -1001,6 +1030,7 @@ class CoreService(Service):
     @private
     async def call_hook(self, name, args, kwargs=None):
         kwargs = kwargs or {}
+        await self.middleware.call_hook(name, *args, **kwargs)
         await self.middleware.call_hook(name, *args, **kwargs)
 
     @private
@@ -1093,7 +1123,7 @@ class CoreService(Service):
 
     @accepts(
         Str('method'),
-        List('args', default=[]),
+        List('args'),
         Str('filename'),
     )
     async def download(self, method, args, filename):
@@ -1139,13 +1169,10 @@ class CoreService(Service):
         Int('sleep'),
     ))
     @job()
-    def job_test(self, job, data=None):
+    def job_test(self, job, data):
         """
         Private no-op method to test a job, simply returning `true`.
         """
-        if data is None:
-            data = {}
-
         sleep = data.get('sleep')
         if sleep is not None:
             def sleep_fn():
@@ -1227,7 +1254,7 @@ class CoreService(Service):
     def threads_stacks(self):
         return get_threads_stacks()
 
-    @accepts(Str("method"), List("params", default=[]))
+    @accepts(Str("method"), List("params"))
     @job(lock=lambda args: f"bulk:{args[0]}")
     async def bulk(self, job, method, params):
         """

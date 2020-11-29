@@ -13,6 +13,7 @@ class GlusterEventsdService(CRUDService):
 
     class Config:
         namespace = 'gluster.eventsd'
+        cli_namespace = 'service.gluster.eventsd'
 
     WORKDIR = '/var/lib/glusterd'
     WEBHOOKS_FILE = WORKDIR + '/events/webhooks.json'

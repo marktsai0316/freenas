@@ -163,6 +163,9 @@ class AlertSerializer:
 
 
 class AlertService(Service):
+    class Config:
+        cli_namespace = "system.alert"
+
     def __init__(self, middleware):
         super().__init__(middleware)
 
@@ -173,8 +176,6 @@ class AlertService(Service):
 
     @private
     async def load(self):
-        is_freenas = await self.middleware.call("system.is_freenas")
-
         main_sources_dir = os.path.join(get_middlewared_dir(), "alert", "source")
         sources_dirs = [os.path.join(overlay_dir, "alert", "source") for overlay_dir in self.middleware.overlay_dirs]
         sources_dirs.insert(0, main_sources_dir)
@@ -837,6 +838,7 @@ class AlertServiceService(CRUDService):
         datastore = "system.alertservice"
         datastore_extend = "alertservice._extend"
         datastore_order_by = ["name"]
+        cli_namespace = "system.alert.service"
 
     @accepts()
     async def list_types(self):
@@ -1032,6 +1034,7 @@ class AlertClassesModel(sa.Model):
 class AlertClassesService(ConfigService):
     class Config:
         datastore = "system.alertclasses"
+        cli_namespace = "system.alert.class"
 
     @accepts(Dict(
         "alert_classes_update",

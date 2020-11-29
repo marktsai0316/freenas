@@ -16,9 +16,10 @@ class DockerImagesService(CRUDService):
 
     class Config:
         namespace = 'docker.images'
+        cli_namespace = 'plugin.docker.image'
 
     @filterable
-    async def query(self, filters=None, options=None):
+    async def query(self, filters, options):
         results = []
         if not await self.middleware.call('service.started', 'docker'):
             return results

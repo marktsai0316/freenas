@@ -14,6 +14,7 @@ class GlusterPeerService(CRUDService):
 
     class Config:
         namespace = 'gluster.peer'
+        cli_namespace = 'service.gluster.peer'
 
     def __peer_wrapper(self, method, host=None):
 

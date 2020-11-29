@@ -89,6 +89,7 @@ class SystemAdvancedService(ConfigService):
         datastore_prefix = 'adv_'
         datastore_extend = 'system.advanced.system_advanced_extend'
         namespace = 'system.advanced'
+        cli_namespace = 'system.advanced'
 
     @accepts()
     async def serial_port_choices(self):
@@ -379,6 +380,9 @@ class SystemService(Service):
     BIRTHDAY_DATE = {
         'date': None,
     }
+
+    class Config:
+        cli_namespace = 'system'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -731,7 +735,7 @@ class SystemService(Service):
 
     @accepts(Dict('system-reboot', Int('delay', required=False), required=False))
     @job()
-    async def reboot(self, job, options=None):
+    async def reboot(self, job, options):
         """
         Reboots the operating system.
 
@@ -752,7 +756,7 @@ class SystemService(Service):
 
     @accepts(Dict('system-shutdown', Int('delay', required=False), required=False))
     @job()
-    async def shutdown(self, job, options=None):
+    async def shutdown(self, job, options):
         """
         Shuts down the operating system.
 
@@ -921,6 +925,7 @@ class SystemGeneralService(ConfigService):
         datastore = 'system.settings'
         datastore_prefix = 'stg_'
         datastore_extend = 'system.general.general_system_extend'
+        cli_namespace = 'system.general'
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

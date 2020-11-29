@@ -13,6 +13,7 @@ class GlusterVolumeService(CRUDService):
 
     class Config:
         namespace = 'gluster.volume'
+        cli_namespace = 'service.gluster.volume'
 
     def __volume_wrapper(self, method, *args, **kwargs):
 

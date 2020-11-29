@@ -113,6 +113,7 @@ class FailoverService(ConfigService):
     class Config:
         datastore = 'system.failover'
         datastore_extend = 'failover.failover_extend'
+        cli_namespace = 'system.failover'
 
     @private
     async def failover_extend(self, data):
@@ -809,7 +810,7 @@ class FailoverService(ConfigService):
             Bool('active'),
         ),
     )
-    async def control(self, action, options=None):
+    async def control(self, action, options):
         if not options:
             # The node making the call is the one we want to make MASTER by default
             node = await self._master_node((await self.middleware.call('failover.node')))
