@@ -122,8 +122,8 @@ class SMBSharePreset(enum.Enum):
         'timemachine': True,
         'auxsmbconf': '\n'.join([
             'tmprotect:auto_rollback=powerloss',
-            'ixnas:zfs_auto_homedir=true',
-            'ixnas:default_user_quota=1T',
+            'ixnas:zfs_auto_homedir=true' if OSC.IS_FREEBSD else 'zfs_core:zfs_auto_create=true',
+            'ixnas:default_user_quota=1T if OSC.IS_FREEBSD else 'zfs_core:base_user_quota=1T',
         ])
     }}
     MULTI_PROTOCOL_AFP = {"verbose_name": "Multi-protocol (AFP/SMB) shares", "params": {
@@ -155,7 +155,7 @@ class SMBSharePreset(enum.Enum):
     PRIVATE_DATASETS = {"verbose_name": "Private SMB Datasets and Shares", "params": {
         'path_suffix': '%U',
         'auxsmbconf': '\n'.join([
-            'ixnas:zfs_auto_homedir=true'
+            'ixnas:zfs_auto_homedir=true' if OSC.IS_FREEBSD else 'zfs_core:zfs_auto_create=true'
         ])
     }}
     WORM_DROPBOX = {"verbose_name": "SMB WORM. Files become readonly via SMB after 5 minutes", "params": {
